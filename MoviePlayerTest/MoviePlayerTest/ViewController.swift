@@ -32,12 +32,13 @@ class ViewController: UIViewController {
     
     override func viewDidLoad() {
         super.viewDidLoad()
-        // Do any additional setup after loading the view.
-        playMovieFromLocalFile(fileFullName: Bundle.main.path(forResource: "test", ofType:"m4v")!)
+        //Do any additional setup after loading the view.
         
-       // playMovie(movieFile: Bundle.main.path(forResource: "test", ofType:"mp4")!, captionFile: Bundle.main.path(forResource: "test", ofType:"srt")!)
+  //      playMovieFromLocalFile(fileFullName: Bundle.main.path(forResource: "test", ofType:"m4v")!)
         
-//        playMovieOnline(webUrl: movieUrl)
+//        playMovie(movieFile: Bundle.main.path(forResource: "test", ofType:"mp4")!, captionFile: Bundle.main.path(forResource: "test", ofType:"srt")!)
+        
+        playMovieOnline(webUrl: movieUrl)
         
     }
     
@@ -58,35 +59,6 @@ class ViewController: UIViewController {
         }
     }
     
-    override func observeValue(forKeyPath keyPath: String?, of object: Any?, change: [NSKeyValueChangeKey : Any]?, context: UnsafeMutableRawPointer?) {
-        
-        let playerItem: AVPlayerItem = object as! AVPlayerItem
-        
-        if keyPath == ViewController.observerKeyStatus {
-            
-            let status =  AVPlayer.Status(rawValue: change?[.newKey] as! Int) ?? AVPlayer.Status.unknown
-            
-            debugPrint("AVPlayer.Status:\(status)")
-            
-            switch status {
-            case AVPlayer.Status.readyToPlay: do {
-                debugPrint("readyToPlay")
-            }
-                break
-                
-            case .failed: do {
-                debugPrint("failed")
-            }
-                break
-                
-            default: break
-                
-            }
-            
-        } else if keyPath == ViewController.observerKeyLoadedTimeRanges {
-        }
-        
-    }
     
     //MARK:UI Event
     @IBAction func handleStartPlayerEvent(sender: AnyObject) {
@@ -109,9 +81,11 @@ class ViewController: UIViewController {
             return false
         }
         
+        //加载视频文件资源（包括视频与所有字幕）
         let asset = AVAsset(url: URL(fileURLWithPath: fileFullName))
         let playerItem = AVPlayerItem(asset: asset)
         
+        //视频文件中所有支持的字幕
         for characteristic in asset.availableMediaCharacteristicsWithMediaSelectionOptions {
             
             debugPrint("\(characteristic)\n")
@@ -123,16 +97,13 @@ class ViewController: UIViewController {
             }
         }
         
-        // Create a group of the legible AVMediaCharacteristics (Subtitles)
         if let group = asset.mediaSelectionGroup(forMediaCharacteristic: AVMediaCharacteristic.legible) {
             
             let locale = Locale(identifier: "zh")
-            // Create an option group to hold the options in the group that match the locale
             let options =
                 AVMediaSelectionGroup.mediaSelectionOptions(from: group.options, with: locale)
-            // Assign the first option from options to the variable option
             if let option = options.first {
-                // Select the option for the selected locale
+                // 如果支持中文，默认选中中文字幕
                 playerItem.select(option, in: group)
             }
         }
@@ -140,11 +111,13 @@ class ViewController: UIViewController {
         player = AVPlayer(playerItem: playerItem)
         player?.appliesMediaSelectionCriteriaAutomatically = false
         
-        if playerLayer == nil && player != nil  {
+        if playerLayer == nil {
             playerLayer = AVPlayerLayer(player: player)
             playerLayer?.videoGravity = AVLayerVideoGravity.resizeAspectFill
             playerContainerView?.layer.addSublayer(playerLayer!)
         }
+        
+        setupPlayerObserverEvent()
         
         return true
     }
@@ -153,73 +126,20 @@ class ViewController: UIViewController {
         
         let fileManage = FileManager.default
         guard fileManage.fileExists(atPath: movieFile) && fileManage.fileExists(atPath: captionFile) else {
-            debugPrint("movie:\(movieFile)/ or captionFile:\(captionFile)not found")
+            debugPrint("movie:\(movieFile)/ or captionFile:\(captionFile)not found\n")
             return false
         }
         
-        
+        //加载视频文件
         player =  AVPlayer(url: URL(fileURLWithPath: movieFile))
-        
-        let asset = AVAsset(url: URL(fileURLWithPath: captionFile))
-        
-        for characteristic in asset.availableMediaCharacteristicsWithMediaSelectionOptions {
-            print("\(characteristic)")
-            
-            // Retrieve the AVMediaSelectionGroup for the specified characteristic.
-            if let group = asset.mediaSelectionGroup(forMediaCharacteristic: characteristic) {
-                // Print its options.
-                for option in group.options {
-                    print("  Option: \(option.displayName)")
-                }
-            }
-        }
-        
-        if let group = asset.mediaSelectionGroup(forMediaCharacteristic: AVMediaCharacteristic.legible) {
-            let locale = Locale(identifier: "en")
-            let options =
-                AVMediaSelectionGroup.mediaSelectionOptions(from: group.options, with: locale)
-            if let option = options.first {
-                // Select Spanish-language subtitle option
-                player?.currentItem!.select(option, in: group)
-                print("\(player?.currentItem!.select(option, in: group))")
-            }
-        }
-        
-        
+        //加载视频文件对应字幕文件
+        parser = Subtitles(file: URL(fileURLWithPath: captionFile))
+    
+        //创建AVPlayerLayer并加入到视图层中
         playerLayer = AVPlayerLayer(player: player)
         playerLayer!.videoGravity = AVLayerVideoGravity.resizeAspectFill
         playerContainerView?.layer.addSublayer(playerLayer!)
-        
-        
-        player?.currentItem?.addObserver(self, forKeyPath:ViewController.observerKeyStatus, options:[NSKeyValueObservingOptions.new, NSKeyValueObservingOptions.initial], context: nil)
-        player?.currentItem?.addObserver(self, forKeyPath: ViewController.observerKeyLoadedTimeRanges, options: NSKeyValueObservingOptions.new, context: nil)
-        
-        // Subtitle file
-        let subtitleFile = Bundle.main.path(forResource: "test", ofType: "srt")
-        let subtitleURL = URL(fileURLWithPath: subtitleFile!)
-        
-        // Subtitle parser
-        parser = Subtitles(file: subtitleURL, encoding: .utf8)
-        
-        player?.addPeriodicTimeObserver(forInterval: CMTimeMake(value: 1, timescale: 1), queue: DispatchQueue.main, using: { [weak self] (time: CMTime) in
-            
-            let currentTime = CMTimeGetSeconds(time)
-            
-            guard let self = self else {
-                return
-            }
-            
-            
-            self.movieTextLabel?.text = self.parser?.searchSubtitles(at: currentTime)
-            
-            let totolCTTime =  self.player?.currentItem?.duration ?? CMTimeMake(value: 0, timescale: 0)
-            
-            let totalTime  = CMTimeGetSeconds(totolCTTime)
-            
-            if totalTime > 0 {
-                self.slider?.value = Float(currentTime/totalTime)
-            }
-        })
+        setupPlayerObserverEvent()
         
         return true
     }
@@ -234,7 +154,11 @@ class ViewController: UIViewController {
         playerLayer = AVPlayerLayer(player: player)
         playerLayer!.videoGravity = AVLayerVideoGravity.resizeAspectFill
         playerContainerView?.layer.addSublayer(playerLayer!)
-        
+        setupPlayerObserverEvent()
+    }
+    
+    //MARK:Player Observer
+    func setupPlayerObserverEvent() -> Void {
         
         player?.currentItem?.addObserver(self, forKeyPath:ViewController.observerKeyStatus, options:[NSKeyValueObservingOptions.new, NSKeyValueObservingOptions.initial], context: nil)
         player?.currentItem?.addObserver(self, forKeyPath: ViewController.observerKeyLoadedTimeRanges, options: NSKeyValueObservingOptions.new, context: nil)
@@ -247,6 +171,8 @@ class ViewController: UIViewController {
                 return
             }
             
+            self.movieTextLabel?.text = self.parser?.searchSubtitles(at: currentTime)
+            
             let totolCTTime =  self.player?.currentItem?.duration ?? CMTimeMake(value: 0, timescale: 0)
             
             let totalTime  = CMTimeGetSeconds(totolCTTime)
@@ -254,11 +180,39 @@ class ViewController: UIViewController {
             if totalTime > 0 {
                 self.slider?.value = Float(currentTime/totalTime)
             }
-            
         })
     }
     
-    
-    
+    override func observeValue(forKeyPath keyPath: String?, of object: Any?, change: [NSKeyValueChangeKey : Any]?, context: UnsafeMutableRawPointer?) {
+        
+        //let playerItem: AVPlayerItem = object as! AVPlayerItem
+        
+        if keyPath == ViewController.observerKeyStatus {
+            
+            let status = AVPlayer.Status(rawValue: change?[.newKey] as! Int)
+            
+            debugPrint("AVPlayer.Status:\(String(describing: status?.rawValue))\n")
+            
+            switch status {
+            case .readyToPlay: do {
+                debugPrint("readyToPlay\n")
+            }
+                break
+                
+            case .failed: do {
+                debugPrint("failed\n")
+            }
+                break
+                
+            default: break
+                
+            }
+            
+        } else if keyPath == ViewController.observerKeyLoadedTimeRanges {
+            
+        }
+    }
 }
+
+
 
